@@ -1,84 +1,83 @@
+import java.util.*;
 import java.util.concurrent.Semaphore;
 
 public class ReadWriteLock {
+    private int activeReaderCount = 0; // Number of active readers
+    private final Semaphore readStatusMutex = new Semaphore(1); // Protects the set of readers that have read
+    private final Semaphore writeLock = new Semaphore(1);    // Ensures exclusive write access
+    private final Semaphore mutex = new Semaphore(1);        // Protects safe increment/decrement of readerCount
 
-    // -----------------------------------------------------
-    // Semaphores and counters
-    // -----------------------------------------------------
-    
-    // turnstile: Blocks new readers if a writer is waiting.
-    private Semaphore turnstile = new Semaphore(1);
-
-    // Protects access to readerCount.
-    private Semaphore readerMutex = new Semaphore(1);
-
-    // Allows only one writer at a time.
-    private Semaphore writerMutex = new Semaphore(1);
-
-    // Number of readers currently reading.
-    private int readerCount = 0;
-    
-    // Number of readers that have read the current data.
-    private int readersReadCurrentData = 0;
-
-    // Total readers that need to read the current data.
-    private int totalReaders = 0;
-
-    // Protects access to readersReadCurrentData and totalReaders.
-    private Semaphore dataReadMutex = new Semaphore(1);
-
+    // List of all possible reader numbers (example: 1..4)
+    private final List<Integer> allReaders = Arrays.asList(1, 2, 3, 4);
+    // Keeps track of which readers have read in the current round
+    private final Set<Integer> currentReaders = new HashSet<>();
 
     /**
      * readLock():
-     *  1) If a writer is waiting, new readers are blocked (turnstile).
-     *  2) If this is the first reader, it acquires writerMutex to block writers.
-     *  3) Increments totalReaders for the current data cycle.
+     *  1) Check whether the reader has already read (using currentReaders set).
+     *  2) If not read yet, add it to currentReaders.
+     *  3) If this is the first active reader (activeReaderCount goes from 0 to 1),
+     *     acquire writeLock to block writers.
      */
-    public void readLock() {
+    public boolean readLock() {
+        int readerNo = getReaderNo();
+        if (readerNo == -1) {
+            System.out.println("Invalid reader number.");
+            return false;
+        }
         try {
-            // Block if a writer is waiting.
-            turnstile.acquire();
-            turnstile.release();
-
-            // Safely increase readerCount.
-            readerMutex.acquire();
-            readerCount++;
-            if (readerCount == 1) {
-                // First reader blocks writer
-                writerMutex.acquire();
+            // Protect currentReaders set
+            readStatusMutex.acquire();
+            if (currentReaders.contains(readerNo)) {
+                // This reader has already read in this round
+                System.out.println("Reader " + readerNo + " has already read. Read operation canceled.");
+                readStatusMutex.release();
+                return false;
+            } else {
+                // If this reader is new to this round, add it
+                currentReaders.add(readerNo);
             }
-            readerMutex.release();
+            readStatusMutex.release();
 
-            // Increase the number of total readers for this cycle.
-            dataReadMutex.acquire();
-            totalReaders++;
-            dataReadMutex.release();
+            // Increase activeReaderCount; if it's the first reader, block writers
+            mutex.acquire();
+            activeReaderCount++;
+            if (activeReaderCount == 1) {
+                // First reader acquires writeLock to prevent writers
+                writeLock.acquire();
+            }
+            mutex.release();
 
+            System.out.println("Reader " + readerNo + " started reading.");
+            return true;
         } catch (InterruptedException e) {
             e.printStackTrace();
+            return false;
         }
     }
 
     /**
      * readUnlock():
-     *  1) Once a reader finishes, it increments the count of readers who have read this data.
-     *  2) If this is the last reader, it releases writerMutex.
+     *  1) Simulate reading by sleeping.
+     *  2) Decrement activeReaderCount; if it goes to 0, release writeLock (allowing writers).
      */
     public void readUnlock() {
+        int readerNo = getReaderNo();
+        if (readerNo == -1) {
+            System.out.println("Invalid reader number.");
+            return;
+        }
         try {
-            // This reader finished reading the current data.
-            dataReadMutex.acquire();
-            readersReadCurrentData++;
-            dataReadMutex.release();
+            System.out.println("Reader " + readerNo + " read data.");
+            Thread.sleep(400); // Simulate reading
 
-            // Safely decrease readerCount.
-            readerMutex.acquire();
-            readerCount--;
-            if (readerCount == 0) {
-                // Last reader releases the writer
-                writerMutex.release();
+            // Decrement activeReaderCount. If it hits 0, let writers proceed
+            mutex.acquire();
+            activeReaderCount--;
+            if (activeReaderCount == 0) {
+                writeLock.release();
             }
-            readerMutex.release();
+            mutex.release();
 
         } catch (InterruptedException e) {
             e.printStackTrace();
@@ -86,44 +85,80 @@ public class ReadWriteLock {
     }
 
     /**
-     * writeLock():
-     *  1) Acquire the turnstile so no new readers can enter.
-     *  2) Acquire writerMutex so that no other writer can proceed.
-     *  3) Wait until all readers have finished reading the previous data 
-     *     (readersReadCurrentData < totalReaders).
-     *  4) Reset counters for the new data cycle.
+     * writeLockMethod():
+     *  1) Writer waits until ALL readers in the list (allReaders) have read the data.
+     *  2) If some readers haven't read yet, keep waiting (Thread.sleep(...) in a loop).
+     *  3) Acquire writeLock to ensure exclusive writing.
+     *  4) Clear currentReaders for the next round.
      */
-    public void writeLock() {
+    public boolean writeLockMethod() {
         try {
-            // Writer locks the turnstile so new readers are blocked.
-            turnstile.acquire();
-            // Prevent other writers from writing simultaneously.
-            writerMutex.acquire();
+            // Continuously check if all readers have read
+            while (true) {
+                readStatusMutex.acquire();
+                if (currentReaders.size() < allReaders.size()) {
+                    // Some readers haven't read yet
+                    List<Integer> yetToRead = new ArrayList<>();
+                    for (int no : allReaders) {
+                        if (!currentReaders.contains(no)) {
+                            yetToRead.add(no);
+                        }
+                    }
+                    System.out.println(Thread.currentThread().getName()
+                            + " is waiting. Readers not finished yet: " + yetToRead);
+                    readStatusMutex.release();
 
-            // Wait for all readers to finish reading old data.
-            dataReadMutex.acquire();
-            while (readersReadCurrentData < totalReaders) {
-                dataReadMutex.release();
-                Thread.sleep(50); // Give readers time to finish
-                dataReadMutex.acquire();
+                    // Wait briefly and retry
+                    Thread.sleep(200);
+                } else {
+                    // All readers have read in this round
+                    readStatusMutex.release();
+                    break;
+                }
             }
 
-            // Reset counters for the new write cycle.
-            readersReadCurrentData = 0;
-            totalReaders = 0;
-            dataReadMutex.release();
+            // Acquire the writeLock (exclusive access for writers)
+            writeLock.acquire();
 
+            // Prepare for the next round of data: clear the set of readers
+            readStatusMutex.acquire();
+            currentReaders.clear();
+            readStatusMutex.release();
+
+            System.out.println(Thread.currentThread().getName() + " started writing.");
+            return true;
         } catch (InterruptedException e) {
             e.printStackTrace();
+            return false;
         }
     }
 
     /**
-     * writeUnlock():
-     *  1) Release writerMutex and turnstile, letting readers enter again.
+     * writeUnlockMethod():
+     *  - Simulate the writing process (Thread.sleep).
+     *  - Release writeLock to allow other threads to proceed.
      */
-    public void writeUnlock() {
-        writerMutex.release();   
-        turnstile.release();     
+    public void writeUnlockMethod() {
+        try {
+            Thread.sleep(500);
+            System.out.println(Thread.currentThread().getName() + " finished writing.");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        writeLock.release();
+    }
+
+    // Helper method: extract reader number from the thread name (assuming "Reader <number>")
+    private int getReaderNo() {
+        String name = Thread.currentThread().getName();
+        if (name.startsWith("Reader ")) {
+            try {
+                return Integer.parseInt(name.substring(7));
+            } catch (NumberFormatException e) {
+                e.printStackTrace();
+                return -1;
+            }
+        }
+        return -1;
     }
 }
