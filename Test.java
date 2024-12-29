@@ -2,13 +2,12 @@ import java.util.Random;
 
 public class Test {
 
-
-    // Okuma-yazma kilidi
+    // Read-Write Lock
     private static ReadWriteLock rwLock = new ReadWriteLock();
 
     public static void main(String[] args) {
 
-        // Okuyucular ve Yazarlar için Thread dizileri
+        // Arrays for 5 reader threads and 5 writer threads.
         Thread[] readers = new Thread[5];
         Thread[] writers = new Thread[5];
 
@@ -17,13 +16,13 @@ public class Test {
             writers[i] = new Thread(new Writer("Writer-" + (i + 1)));
         }
 
-        // Tüm okuyucu ve yazar thread'lerini rastgele sırayla başlat
-        Random random = new Random();
+        // Combine all threads into one array.
         Thread[] allThreads = new Thread[10];
         System.arraycopy(readers, 0, allThreads, 0, 5);
         System.arraycopy(writers, 0, allThreads, 5, 5);
 
-        // Thread'leri karıştır
+        // Randomly shuffle the threads.
+        Random random = new Random();
         for (int i = 0; i < allThreads.length; i++) {
             int swapIndex = random.nextInt(allThreads.length);
             Thread temp = allThreads[i];
@@ -31,15 +30,15 @@ public class Test {
             allThreads[swapIndex] = temp;
         }
 
-        // Thread'leri başlat
+        // Start all threads
         for (Thread thread : allThreads) {
             thread.start();
         }
     }
 
     /**
-     * Reader (Okuyucu) Thread:
-     * - Sık sık readLock() alıp veriyi okur, sonra readUnlock() çağırır.
+     * Reader Thread:
+     * Reads between readLock() / readUnlock().
      */
     static class Reader implements Runnable {
         private String name;
@@ -51,18 +50,18 @@ public class Test {
         @Override
         public void run() {
             while (true) {
-                rwLock.readLock();  // Okumaya başla
+                rwLock.readLock();  // Acquire read lock
                 try {
                     System.out.println(name + " is reading.");
-                    Thread.sleep(1000); // Okuma işlemi (simülasyon)
+                    Thread.sleep(1000); // Simulate reading
                     System.out.println(name + " finished reading.");
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 } finally {
-                    rwLock.readUnlock();  // Okumayı bitir
+                    rwLock.readUnlock();  // Release read lock
                 }
 
-                // Okumalar arasında biraz bekleyelim
+                // Pause for a random interval between reads
                 try {
                     Thread.sleep(new Random().nextInt(2000) + 1000);
                 } catch (InterruptedException e) {
@@ -73,8 +72,8 @@ public class Test {
     }
 
     /**
-     * Writer (Yazar) Thread:
-     * - Sık sık writeLock() alıp veriyi yazar, sonra writeUnlock() çağırır.
+     * Writer Thread:
+     * Writes between writeLock() / writeUnlock().
      */
     static class Writer implements Runnable {
         private String name;
@@ -86,18 +85,18 @@ public class Test {
         @Override
         public void run() {
             while (true) {
-                rwLock.writeLock();  // Yazmaya başla
+                rwLock.writeLock();  // Acquire write lock
                 try {
                     System.out.println(name + " is writing...");
-                    Thread.sleep(500); // Yazma işlemi (simülasyon)
+                    Thread.sleep(500); // Simulate writing
                     System.out.println(name + " finished writing.");
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 } finally {
-                    rwLock.writeUnlock(); // Yazmayı bitir
+                    rwLock.writeUnlock(); // Release write lock
                 }
 
-                // Yazmalar arasında biraz bekleyelim
+                // Pause for a random interval between writes
                 try {
                     Thread.sleep(new Random().nextInt(2000) + 1000);
                 } catch (InterruptedException e) {
